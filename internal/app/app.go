@@ -9,6 +9,7 @@ import (
 
 	"github.com/twfksh/TinyAPI/internal/api"
 	"github.com/twfksh/TinyAPI/internal/store"
+	"github.com/twfksh/TinyAPI/migrations"
 )
 
 type Application struct {
@@ -23,12 +24,18 @@ func InitApplication() (*Application, error) {
 		return nil, err
 	}
 
+	err = store.MigrateFS(db, migrations.FS, ".")
+	if err != nil {
+		panic(err)
+	}
+
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime)
 
-	// TODO: stores go here
+	// INFO: stores go here
+	workoutStore := store.NewPostgresWorkoutStore(db)
 
 	// INFO: handlers go here
-	workoutHandler := api.NewWorkoutHandler()
+	workoutHandler := api.NewWorkoutHandler(workoutStore)
 
 	app := &Application{
 		Logger:         logger,
