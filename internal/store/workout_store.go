@@ -42,6 +42,7 @@ func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
 	}
 	defer tx.Rollback()
 
+	// FIX: handle edge case for missing fields entry
 	query := `INSERT INTO workouts (
 							title,
 							description,
@@ -73,7 +74,7 @@ func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
 							VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 
 		err := tx.QueryRow(query,
-			entry.ID,
+			w.ID,
 			entry.ExcerciseName,
 			entry.Sets,
 			entry.Reps,
