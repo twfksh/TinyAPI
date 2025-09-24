@@ -13,7 +13,7 @@ type Workout struct {
 
 type WorkoutEntry struct {
 	ID              int      `json:"id"`
-	ExcerciseName   string   `json:"excercise_name"`
+	ExerciseName    string   `json:"exercise_name"`
 	Sets            int      `json:"sets"`
 	Reps            *int     `json:"reps"`
 	DurationSeconds *int     `json:"duration_seconds"`
@@ -25,6 +25,8 @@ type WorkoutEntry struct {
 type WorkoutStore interface {
 	CreateWorkout(*Workout) (*Workout, error)
 	GetWorkoutById(id int64) (*Workout, error)
+	UpdateWorkout(*Workout) error
+	DeleteWorkout(id int64) error
 }
 
 type PostgresWorkoutStroe struct {
@@ -35,7 +37,7 @@ func NewPostgresWorkoutStore(db *sql.DB) *PostgresWorkoutStroe {
 	return &PostgresWorkoutStroe{db: db}
 }
 
-func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
+func (pg *PostgresWorkoutStroe) CreateWorkout(workout *Workout) (*Workout, error) {
 	tx, err := pg.db.Begin()
 	if err != nil {
 		return nil, err
@@ -52,18 +54,18 @@ func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
 						VALUES ($1, $2, $3, $4) RETURNING id`
 
 	err = tx.QueryRow(query,
-		w.Title,
-		w.Description,
-		w.DurationMinutes,
-		w.CaloriesBurned).Scan(&w.ID)
+		workout.Title,
+		workout.Description,
+		workout.DurationMinutes,
+		workout.CaloriesBurned).Scan(&workout.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, entry := range w.Entries {
+	for _, entry := range workout.Entries {
 		query := `INSERT INTO workout_entries (
 								workout_id,
-								excercise_name,
+								exercise_name,
 								sets,
 								reps,
 								duration_seconds,
@@ -74,8 +76,8 @@ func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
 							VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 
 		err := tx.QueryRow(query,
-			w.ID,
-			entry.ExcerciseName,
+			workout.ID,
+			entry.ExerciseName,
 			entry.Sets,
 			entry.Reps,
 			entry.DurationSeconds,
@@ -92,10 +94,135 @@ func (pg *PostgresWorkoutStroe) CreateWorkout(w *Workout) (*Workout, error) {
 		return nil, err
 	}
 
-	return w, nil
+	return workout, nil
 }
 
 func (pg *PostgresWorkoutStroe) GetWorkoutById(id int64) (*Workout, error) {
-	w := &Workout{}
-	return w, nil
+	workout := &Workout{}
+	workoutQuery := `SELECT id, title, description, duration_minutes, calories_burned
+				FROM workouts
+				WHERE id = $1`
+	err := pg.db.QueryRow(workoutQuery, id).Scan(
+		&workout.ID,
+		&workout.Title,
+		&workout.Description,
+		&workout.DurationMinutes,
+		&workout.CaloriesBurned,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	entryQuery := `SELECT id, exercise_name, sets, reps, duration_seconds, weight, notes, order_index
+					FROM workout_entries
+					WHERE workout_id = $1
+					ORDER BY order_index`
+	rows, err := pg.db.Query(entryQuery, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		entry := WorkoutEntry{}
+		err := rows.Scan(
+			&entry.ID,
+			&entry.ExerciseName,
+			&entry.Sets,
+			&entry.Reps,
+			&entry.DurationSeconds,
+			&entry.Weight,
+			&entry.Notes,
+			&entry.OrderIndex,
+		)
+		if err != nil {
+			return nil, err
+		}
+		workout.Entries = append(workout.Entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return workout, nil
+}
+
+func (pg *PostgresWorkoutStroe) UpdateWorkout(workout *Workout) error {
+	tx, err := pg.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	query := `
+	UPDATE workouts 
+	SET title = $1, description = $2, duration_minutes = $3, calories_burned = $4
+	WHERE id = $5
+	`
+
+	result, err := tx.Exec(query, workout.Title, workout.Description, workout.DurationMinutes, workout.CaloriesBurned, workout.ID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	_, err = tx.Exec(`DELETE FROM workout_entries WHERE workout_id = $1`, workout.ID)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range workout.Entries {
+		query := `
+		INSERT INTO workout_entries (workout_id, exercise_name, sets, reps, duration_seconds, notes, order_index)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`
+
+		_, err := tx.Exec(
+			query,
+			workout.ID,
+			entry.ExerciseName,
+			entry.Sets,
+			entry.Reps,
+			entry.DurationSeconds,
+			entry.Notes,
+			entry.OrderIndex,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (pg *PostgresWorkoutStroe) DeleteWorkout(id int64) error {
+	query := `
+	DELETE FROM workouts
+	WHERE id = $1
+	`
+
+	result, err := pg.db.Exec(query, id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }

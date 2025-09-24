@@ -1,9 +1,9 @@
 services:
-  db: 
+  db:
     container_name: tiny_api_db
     image: postgres:alpine
     volumes:
-      - ./data/postgres-data:/var/lib/postgresql/data:rw
+      - ./data/pg:/var/lib/postgresql/data:rw
     ports:
       - 5432:5432
     environment:
